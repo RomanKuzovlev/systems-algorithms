@@ -108,5 +108,35 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
         }
     }
 
+    // Normalization
+    int result_exp = real_a_exp;
+
+    // Case: overflow from addition
+    if (result_frac & (1 << 24))
+    {
+        result_frac >>= 1;
+        result_exp += 1;
+        if (result_exp >= 255)
+        {
+            return (result_sign << 31) | (0xFF << 23); // Infinity
+        }
+    }
+
+    // Case: under-normalized result (after subtraction or small addition)
+    while ((result_frac & (1 << 23)) == 0 && result_exp > 0)
+    {
+        result_frac <<= 1;
+        result_exp -= 1;
+    }
+
+    // Optional: shift into subnormal if needed
+    if (result_exp == 0)
+    {
+        while ((result_frac & (1 << 23)) == 0 && result_frac != 0)
+        {
+            result_frac <<= 1;
+        }
+    }
+
     return 0;
 }
