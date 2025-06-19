@@ -78,5 +78,35 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
         a_frac = (a_frac >> shift) | sticky;
         real_a_exp = real_b_exp;
     }
+
+    uint32_t result_sign;
+    uint32_t result_frac;
+
+    // Same sign -> ADD
+    if (a_sign == b_sign)
+    {
+        result_frac = a_frac + b_frac;
+        result_sign = a_sign;
+    }
+    else
+    {
+        // Different signs -> SUBTRACT
+        if (a_frac > b_frac)
+        {
+            result_frac = a_frac - b_frac;
+            result_sign = a_sign;
+        }
+        else if (b_frac > a_frac)
+        {
+            result_frac = b_frac - a_frac;
+            result_sign = b_sign;
+        }
+        else
+        {
+            // Equal and different signs -> 0
+            return 0x00000000;
+        }
+    }
+
     return 0;
 }
