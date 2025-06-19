@@ -41,7 +41,8 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
 
     if (a_zero && b_zero)
     {
-        // Return −0 only if both are −0, else +0; -0 is when exp and mantissa are 0, but sign is 1
+        // Return −0 only if both are −0, else +0;
+        // -0 is when exp and mantissa are 0, but sign is 1
         return (a_sign & b_sign) << 31;
     }
     if (a_zero)
@@ -57,5 +58,25 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
     uint32_t real_a_exp = (a_exp == 0) ? 1 : a_exp;
     uint32_t real_b_exp = (b_exp == 0) ? 1 : b_exp;
 
+    // Align exponents by shifting the smaller fraction
+    if (real_a_exp > real_b_exp)
+    {
+        int shift = real_a_exp - real_b_exp;
+        if (shift > 31)
+            shift = 31;
+        // Introduce sticky bit for rounding (preserve lost bits)
+        uint32_t sticky = (shift >= 1 && (b_frac & ((1U << (shift - 1)) - 1))) ? 1 : 0;
+        b_frac = (b_frac >> shift) | sticky;
+        real_b_exp = real_a_exp;
+    }
+    else if (real_b_exp > real_a_exp)
+    {
+        int shift = real_b_exp - real_a_exp;
+        if (shift > 31)
+            shift = 31;
+        uint32_t sticky = (shift >= 1 && (a_frac & ((1U << (shift - 1)) - 1))) ? 1 : 0;
+        a_frac = (a_frac >> shift) | sticky;
+        real_a_exp = real_b_exp;
+    }
     return 0;
 }
