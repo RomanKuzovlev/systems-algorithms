@@ -2,6 +2,10 @@
 #include <iomanip>
 #include <cstdint>
 
+// IEEE 754 is a masterpiece — massive respect to its creators.
+// Implementing it is tough (I used AI as an assistant).
+// Inventing it is beyond imagination.
+
 uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
 {
     // Extract sign, exponent, mantissa
