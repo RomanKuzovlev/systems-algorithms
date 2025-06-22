@@ -26,11 +26,7 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
     bool b_inf = (b_exp == 0xFF && b_man == 0);
 
     if (a_inf && b_inf)
-    {
-        if (a_sign != b_sign)
-            return 0x7FC00000; // inf - inf = NaN
-        return a_bits;         // same-signed infinities -> return one
-    }
+        return (a_sign != b_sign ? 0x7FC00000u : a_bits);
     if (a_inf)
         return a_bits;
     if (b_inf)
@@ -51,39 +47,41 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
     if (b_zero)
         return a_bits;
 
-    // Add implicit leading 1 if normalized
-    uint32_t a_frac = (a_exp == 0) ? a_man : ((1u << 23) | a_man);
-    uint32_t b_frac = (b_exp == 0) ? b_man : ((1u << 23) | b_man);
+    // Rebuild the fractions and reserve 2 low bits (G & R)
+    uint32_t a_frac = (a_exp ? (1u << 23) | a_man : a_man) << 2;
+    uint32_t b_frac = (b_exp ? (1u << 23) | b_man : b_man) << 2;
 
-    // Adjust exponent for subnormals (treat subnormals as if exp = 1)
-    uint32_t real_a_exp = (a_exp == 0) ? 1 : a_exp;
-    uint32_t real_b_exp = (b_exp == 0) ? 1 : b_exp;
+    int a_e = a_exp ? a_exp : 1; // subnormal exponent is 1
+    int b_e = b_exp ? b_exp : 1;
+
+    uint32_t sticky = 0; // any 1s we shift out live here
 
     // Align exponents by shifting the smaller fraction
-    if (real_a_exp > real_b_exp)
+    if (a_e != b_e)
     {
-        uint32_t shift = real_a_exp - real_b_exp;
-        if (shift > 31)
-            shift = 31;
-        // Introduce sticky bit for rounding (preserve lost bits)
-        uint32_t lost = shift ? b_frac & ((1u << shift) - 1u) : 0u;         // FIX
-        b_frac = (shift == 31 ? 0u : (b_frac >> shift)) | (lost ? 1u : 0u); // FIX
-        real_b_exp = real_a_exp;
+        if (a_e < b_e)
+        { // make a the larger‑exp operand
+            std::swap(a_e, b_e);
+            std::swap(a_frac, b_frac);
+            std::swap(a_sign, b_sign);
+        }
+        uint32_t shift = a_e - b_e;
+        if (shift >= 32)
+        {
+            sticky |= (b_frac != 0);
+            b_frac = 0;
+        }
+        else
+        {
+            sticky |= b_frac & ((1u << shift) - 1u);
+            b_frac >>= shift;
+        }
+        b_e = a_e;
     }
-    else if (real_b_exp > real_a_exp)
-    {
-        uint32_t shift = real_b_exp - real_a_exp;
-        if (shift > 31)
-            shift = 31;
-        uint32_t lost = shift ? a_frac & ((1u << shift) - 1u) : 0u;         // FIX
-        a_frac = (shift == 31 ? 0u : (a_frac >> shift)) | (lost ? 1u : 0u); // FIX
-        real_a_exp = real_b_exp;
-    }
-
-    uint32_t result_sign;
-    uint32_t result_frac;
 
     // Same sign -> ADD
+    uint32_t result_frac;
+    uint32_t result_sign;
     if (a_sign == b_sign)
     {
         result_frac = a_frac + b_frac;
@@ -104,74 +102,69 @@ uint32_t fp_add(uint32_t a_bits, uint32_t b_bits)
         }
         else
         {
-            return 0x00000000;
-        } // Equal and diff signs -> 0
+            return 0u;
+        } // exact cancellation -> +0
     }
+
+    int result_exp = a_e; // both equal now
 
     // Normalization
-    int result_exp = static_cast<int>(real_a_exp);
-
-    // Case: overflow from addition
-    if (result_frac & (1u << 24))
-    {
+    if (result_frac & (1u << 26))
+    {                               // carry into bit 26
+        sticky |= result_frac & 1u; // bit that falls off
         result_frac >>= 1;
-        ++result_exp;
-        if (result_exp >= 255)
-            return (result_sign << 31) | (0xFF << 23); // Infinity
+        if (++result_exp >= 255)
+            return (result_sign << 31) | (0xFFu << 23); // overflow -> +-∞
     }
 
-    // Case: under-normalized result (after subtraction or small addition)
-    while ((result_frac & (1u << 23)) == 0 && result_exp > 0)
+    while ((result_frac & (1u << 25)) == 0 && result_exp > 0)
     {
         result_frac <<= 1;
         --result_exp;
     }
 
-    // Optional: shift into subnormal if needed
-    if (result_exp <= 0)
-    {
-        uint32_t shift = static_cast<uint32_t>(1 - result_exp); // how far subnormal
-        if (shift > 31)
-            shift = 31;
-        uint32_t lost = shift ? result_frac & ((1u << shift) - 1u) : 0u;
-        result_frac = (shift == 31 ? 0u : (result_frac >> shift)) | (lost ? 1u : 0u);
-        result_exp = 0;
+    if (result_exp == 0)
+    { // subnormal shift
+        uint32_t shift = 1;
+        sticky |= result_frac & ((1u << shift) - 1u);
+        result_frac >>= shift;
     }
 
-    // Extract rounding bits
-    uint32_t guard_bit = result_frac & 1u; // guard
-    uint32_t round_bit = 0;                // unused (info folded into guard)
-    uint32_t sticky_bit = guard_bit;       // lost bits already ORed
+    // Guard / round bits
+    uint32_t guard = (result_frac >> 1) & 1u; // bit 1
+    uint32_t round = result_frac & 1u;        // bit 0
 
-    // Shift result to fit 23-bit mantissa (drop lower bits)
-    result_frac >>= 1; // move rounding window
-    uint32_t mantissa = result_frac & 0x007FFFFF;
+    result_frac >>= 2;                            // drop G & R
+    uint32_t mantissa = result_frac & 0x007FFFFF; // strip hidden 1
 
-    // Round to nearest-even
-    if (guard_bit && (mantissa & 1u))
+    // Round‑to‑nearest, ties‑to‑even
+    bool round_up = false;
+    if (guard)
+    {
+        round_up = round | sticky;        // > half
+        if (!round_up && (mantissa & 1u)) // exactly half & odd -> up
+            round_up = true;
+    }
+
+    if (round_up)
     {
         ++mantissa;
-
-        // Handle mantissa overflow (e.g., 0x007FFFFF + 1)
         if (mantissa >> 23)
-        {
-            mantissa >>= 1;
-            ++result_exp;
-            if (result_exp >= 255)
-                return (result_sign << 31) | (0xFF << 23); // Infinity
+        { // mantissa overflow
+            mantissa &= 0x007FFFFF;
+            if (++result_exp >= 255)
+                return (result_sign << 31) | (0xFFu << 23); // +-∞
         }
     }
 
-    uint32_t result = (result_sign << 31) | (static_cast<uint32_t>(result_exp) << 23) | (mantissa & 0x007FFFFF);
-    return result;
+    return (result_sign << 31) | (static_cast<uint32_t>(result_exp) << 23) | mantissa;
 }
 
+// Test
 struct TestCase
 {
     const char *name;
-    uint32_t a_bits;
-    uint32_t b_bits;
-    uint32_t expected;
+    uint32_t a_bits, b_bits, expected;
 };
 
 int main()
@@ -184,24 +177,14 @@ int main()
         {"1 + (-1)", 0x3f800000, 0xbf800000, 0x00000000},
         {"-0 + -0", 0x80000000, 0x80000000, 0x80000000},
         {"subnormal + sub", 0x00400000, 0x00800000, 0x00c00000},
-        {"round-to-even", 0x3effffff, 0x3effffff, 0x3f7fffff},
+        {"round to even", 0x3effffff, 0x3effffff, 0x3f7fffff},
     };
 
-    for (const auto &test : tests)
+    for (const auto &t : tests)
     {
-        uint32_t result = fp_add(test.a_bits, test.b_bits);
-
-        std::cout << test.name << ":\n";
-        std::cout << "  result   = " << std::hex << std::setw(8) << std::setfill('0') << result << '\n';
-        std::cout << "  expected = " << std::hex << std::setw(8) << std::setfill('0') << test.expected;
-
-        if (result == test.expected)
-            std::cout << " ✅ PASS\n";
-        else
-            std::cout << " ❌ FAIL\n";
-
-        std::cout << '\n';
+        uint32_t got = fp_add(t.a_bits, t.b_bits);
+        std::cout << t.name << ":\n  result   = 0x" << std::hex << std::setw(8)
+                  << std::setfill('0') << got << "\n  expected = 0x"
+                  << std::setw(8) << t.expected << (got == t.expected ? " ✅\n\n" : " ❌\n\n");
     }
-
-    return 0;
 }
