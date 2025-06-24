@@ -1,5 +1,10 @@
-    .globl _start
+.section .data
+array:
+    .long 5, 3, 8, 1, 2      # 5 ints array
+len:
+    .long 5
 
+.globl _start
 .section .text
 
 _start:
