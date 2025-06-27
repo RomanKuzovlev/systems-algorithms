@@ -1,10 +1,10 @@
 .section .bss
 swapped:
-    .skip 1                  # 1 byte for the swapped flag
+    .skip 1                     # 1 byte for the swapped flag
 
 .section .data
 array:
-    .long 5, 3, 8, 1, 2      # 5 ints array
+    .long 5, 3, 8, 1, 2, 1      # 5 ints array
 len:
     .long 5
 
