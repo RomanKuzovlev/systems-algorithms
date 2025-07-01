@@ -1,9 +1,6 @@
 // A bubble sort in x86-64 Linux assembly using AT&T syntax.
 
-// as -o sorting.o ./sorting.s
-// 
-
-        .section .bss
+.section .bss
 swapped: .byte 0                      # flag
 
         .section .data
@@ -24,7 +21,7 @@ bubble_outer:
 
 // inner for (i = 1; i < n; ++i)
 bubble_inner:
-        cmp  %edx, %ecx               # i < n ?
+        cmp  %ecx, %edx               # i < n ?
         jge  check_swapped            # if i >= n, break inner loop
 
         mov  (%rsi,%rdx,4), %eax      # eax <- arr[i]
