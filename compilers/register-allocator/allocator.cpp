@@ -1,16 +1,16 @@
-// g++ -std=c++17 -O2 liveness.cpp && ./a.out
+// Minimal liveness + interference graph + register assignment
+// Compile: g++ -std=c++17 -O2 liveness.cpp && ./a.out
 #include <bits/stdc++.h>
 using namespace std;
 
 struct Instr
 {
-    vector<string> use;   // variables read
-    optional<string> def; // variable written (if any)
+    vector<string> use;
+    optional<string> def;
 };
 
 int main()
 {
-    // toy program
     vector<Instr> prog = {
         {{"a", "b"}, "t1"},  // t1 = a + b
         {{"t1", "c"}, "t2"}, // t2 = t1 * c
@@ -57,12 +57,38 @@ int main()
             }
     }
 
-    // dump adjacency list
-    for (auto &[v, adj] : graph)
+    const int K = 2; // number of available registers
+    unordered_map<string, int> reg;
+    for (auto &[v, _] : graph)
     {
-        cout << v << ':';
-        for (const string &n : adj)
-            cout << ' ' << n;
+        vector<bool> used(K, false);
+        for (const string &neighbor : graph[v])
+        {
+            if (reg.count(neighbor) && reg[neighbor] != -1 && reg[neighbor] < K)
+            {
+                used[reg[neighbor]] = true;
+            }
+        }
+        int r = -1;
+        for (int k = 0; k < K; ++k)
+        {
+            if (!used[k])
+            {
+                r = k;
+                break;
+            }
+        }
+        reg[v] = r; // -1 means spilled
+    }
+
+    cout << "\nRegister assignment (−1 = spilled):\n";
+    for (auto &[v, r] : reg)
+    {
+        cout << v << " → ";
+        if (r == -1)
+            cout << "spill";
+        else
+            cout << "r" << r;
         cout << '\n';
     }
 }
